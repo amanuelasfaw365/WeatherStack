@@ -8,15 +8,17 @@ import {
   useCallback,
   ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: "user" | "admin";
 }
 
-interface LastSession {
+export interface LastSession {
   country: string;
   timestamp: string;
 }
@@ -37,17 +39,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [lastSession, setLastSession] = useState<LastSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  const signOut = useCallback(() => {
+    setUser(null);
+    setLastSession(null);
+    router.push("/login");
+  }, [router]);
 
   const fetchMe = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me");
+      const res = await fetchWithAuth("/api/auth/me");
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
         if (data.user.lastSession) setLastSession(data.user.lastSession as LastSession);
       }
     } catch {
-      // not logged in
+      // not logged in or network error
     } finally {
       setLoading(false);
     }
@@ -56,6 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchMe();
   }, [fetchMe]);
+
+  // When fetchWithAuth exhausts the refresh token it fires this event
+  useEffect(() => {
+    window.addEventListener("auth:signout", signOut);
+    return () => window.removeEventListener("auth:signout", signOut);
+  }, [signOut]);
 
   const login = async (email: string, password: string) => {
     const res = await fetch("/api/auth/login", {
@@ -69,7 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.lastSession) setLastSession(data.lastSession as LastSession);
   };
 
-  const register = async (name: string, email: string, password: string, role = "user") => {
+  const register = async (
+    name: string,
+    email: string,
+    password: string,
+    role = "user"
+  ) => {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

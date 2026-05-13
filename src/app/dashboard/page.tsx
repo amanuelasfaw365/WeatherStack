@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SearchBar } from "@/components/SearchBar";
 import { WeatherCard } from "@/components/WeatherCard";
 import { HistorySidebar } from "@/components/HistorySidebar";
@@ -45,7 +47,7 @@ export default function DashboardPage() {
   const [currentCountry, setCurrentCountry] = useState<string | undefined>();
 
   const fetchHistory = useCallback(async () => {
-    const res = await fetch("/api/history");
+    const res = await fetchWithAuth("/api/history");
     if (res.ok) {
       const data = await res.json();
       setHistory(data.history);
@@ -69,7 +71,7 @@ export default function DashboardPage() {
     setError("");
     setSearchLoading(true);
     try {
-      const res = await fetch("/api/weather/search", {
+      const res = await fetchWithAuth("/api/weather/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),
@@ -119,14 +121,27 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-900">
-      {/* Header */}
       <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-bold text-white">WeatherStack</h1>
         <div className="flex items-center gap-4">
+          {user?.role === "admin" && (
+            <Link
+              href="/dashboard/admin"
+              className="text-amber-400 hover:text-amber-300 text-sm transition-colors"
+            >
+              Admin Panel
+            </Link>
+          )}
           {user && (
             <span className="text-slate-400 text-sm">
               {user.name}{" "}
-              <span className="bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full ml-1">
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
+                  user.role === "admin"
+                    ? "bg-amber-900 text-amber-300"
+                    : "bg-slate-700 text-slate-300"
+                }`}
+              >
                 {user.role}
               </span>
             </span>
@@ -141,7 +156,6 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Session Resume Banner */}
         {lastSession && (
           <div className="mb-6">
             <SessionBanner
@@ -154,7 +168,6 @@ export default function DashboardPage() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column: search + weather */}
           <div className="lg:col-span-2 space-y-6">
             <SearchBar onSearch={handleSearch} loading={searchLoading} />
 
@@ -176,7 +189,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Right column: history */}
           <div>
             <HistorySidebar history={history} onReSearch={handleReSearch} />
           </div>

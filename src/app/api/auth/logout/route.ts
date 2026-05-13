@@ -5,28 +5,42 @@ import { verifyAccessToken } from "@/lib/jwt";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { currentCountry } = body;
+    const { currentCountry } = body as { currentCountry?: string };
 
     const accessToken = req.cookies.get("access_token")?.value;
     const refreshToken = req.cookies.get("refresh_token")?.value;
 
+    let userId: string | null = null;
+
+    // Identify the user — try access token first, fall back to refresh token DB lookup
     if (accessToken) {
       try {
-        const payload = verifyAccessToken(accessToken);
-        if (currentCountry) {
-          await prisma.user.update({
-            where: { id: payload.sub },
-            data: {
-              lastSession: {
-                country: currentCountry,
-                timestamp: new Date().toISOString(),
-              },
-            },
-          });
-        }
+        userId = verifyAccessToken(accessToken).sub;
       } catch {
-        // token may be expired; still proceed with logout
+        // access token expired: resolve user from the stored refresh token
       }
+    }
+
+    if (!userId && refreshToken) {
+      const stored = await prisma.refreshToken.findUnique({
+        where: { token: refreshToken },
+      });
+      if (stored && stored.expiresAt > new Date()) {
+        userId = stored.userId;
+      }
+    }
+
+    // Persist the last-viewed country before clearing the session
+    if (userId && currentCountry) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          lastSession: {
+            country: currentCountry,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
     }
 
     if (refreshToken) {
