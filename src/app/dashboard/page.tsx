@@ -7,7 +7,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SearchBar } from "@/components/SearchBar";
 import { WeatherCard } from "@/components/WeatherCard";
+import { WeatherCardSkeleton } from "@/components/WeatherCardSkeleton";
+import { WeatherErrorBoundary } from "@/components/WeatherErrorBoundary";
 import { HistorySidebar } from "@/components/HistorySidebar";
+import { HistorySidebarSkeleton } from "@/components/HistorySidebarSkeleton";
 import { SessionBanner } from "@/components/SessionBanner";
 
 interface WeatherData {
@@ -27,6 +30,12 @@ interface WeatherData {
   flagUrl: string;
 }
 
+interface WeatherResult {
+  data: WeatherData;
+  stale: boolean;
+  cachedAt?: string;
+}
+
 interface HistoryItem {
   id: string;
   country: string;
@@ -40,17 +49,27 @@ export default function DashboardPage() {
   const { user, lastSession, loading: authLoading, logout, clearLastSession } = useAuth();
   const router = useRouter();
 
-  const [weather, setWeather] = useState<WeatherData | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [weatherResult, setWeatherResult] = useState<WeatherResult | null>(null);
+  const [history, setHistory] = useState<HistoryItem[] | undefined>(undefined);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState("");
   const [currentCountry, setCurrentCountry] = useState<string | undefined>();
 
   const fetchHistory = useCallback(async () => {
-    const res = await fetchWithAuth("/api/history");
-    if (res.ok) {
-      const data = await res.json();
-      setHistory(data.history);
+    setHistoryLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/history");
+      if (res.ok) {
+        const data = await res.json();
+        setHistory(data.history);
+      } else {
+        setHistory([]);
+      }
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -81,7 +100,11 @@ export default function DashboardPage() {
         setError(data.error || "Search failed");
         return;
       }
-      setWeather(data.weather);
+      setWeatherResult({
+        data: data.weather,
+        stale: data.stale ?? false,
+        cachedAt: data.cachedAt,
+      });
       setCurrentCountry(data.weather.country);
       await fetchHistory();
     } catch {
@@ -177,20 +200,34 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {weather ? (
-              <WeatherCard data={weather} />
+            {searchLoading ? (
+              <WeatherCardSkeleton />
+            ) : weatherResult ? (
+              <WeatherErrorBoundary>
+                <WeatherCard
+                  data={weatherResult.data}
+                  stale={weatherResult.stale}
+                  cachedAt={weatherResult.cachedAt}
+                />
+              </WeatherErrorBoundary>
             ) : (
               !error && (
                 <div className="bg-slate-800/50 rounded-2xl p-12 border border-slate-700 text-center">
                   <p className="text-slate-500 text-4xl mb-3">⛅</p>
-                  <p className="text-slate-400">Search for a city or coordinates to see weather</p>
+                  <p className="text-slate-400">
+                    Search for a city or coordinates to see weather
+                  </p>
                 </div>
               )
             )}
           </div>
 
           <div>
-            <HistorySidebar history={history} onReSearch={handleReSearch} />
+            {historyLoading && history === undefined ? (
+              <HistorySidebarSkeleton />
+            ) : (
+              <HistorySidebar history={history} onReSearch={handleReSearch} />
+            )}
           </div>
         </div>
       </main>

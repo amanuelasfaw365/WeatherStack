@@ -2,6 +2,17 @@ const OWM_KEY = process.env.OPENWEATHER_API_KEY!;
 const GEO_URL = "https://api.openweathermap.org/geo/1.0";
 const OWM_URL = "https://api.openweathermap.org/data/2.5";
 
+/** Thrown for any non-2xx OWM response. Callers inspect `.status` to branch. */
+export class WeatherApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+    this.name = "WeatherApiError";
+  }
+}
+
 export interface GeoResult {
   name: string;
   country: string;
@@ -32,7 +43,7 @@ export async function geocodeByName(query: string): Promise<GeoResult[]> {
     `${GEO_URL}/direct?q=${encodeURIComponent(query)}&limit=5&appid=${OWM_KEY}`,
     { cache: "no-store" }
   );
-  if (!res.ok) throw new Error("Geocoding failed");
+  if (!res.ok) throw new WeatherApiError("Geocoding API error", res.status);
   return res.json();
 }
 
@@ -44,7 +55,10 @@ export async function getWeatherByCoords(
     `${OWM_URL}/weather?lat=${lat}&lon=${lon}&units=metric&appid=${OWM_KEY}`,
     { cache: "no-store" }
   );
-  if (!res.ok) throw new Error("Weather fetch failed");
+  if (!res.ok) {
+    const msg = res.status === 429 ? "Rate limit exceeded" : "Weather API error";
+    throw new WeatherApiError(msg, res.status);
+  }
   const d = await res.json();
 
   return {

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
-import { geocodeByName, getWeatherByCoords, validateCoords } from "@/lib/weather";
+import {
+  geocodeByName,
+  getWeatherByCoords,
+  validateCoords,
+  WeatherApiError,
+} from "@/lib/weather";
+import { getCachedWeather, setCachedWeather } from "@/lib/weatherCache";
 import { upsertSearchHistory } from "@/lib/history";
 
 export async function POST(req: NextRequest) {
@@ -15,39 +21,76 @@ export async function POST(req: NextRequest) {
     let lat: number, lon: number, city: string | undefined, country: string;
 
     if (mode === "coords") {
-      lat = parseFloat(rawLat);
-      lon = parseFloat(rawLon);
-      const err = validateCoords(lat, lon);
-      if (err) return NextResponse.json({ error: err }, { status: 400 });
+      // Guard missing inputs before parsing
+      if (rawLat == null || rawLon == null)
+        return NextResponse.json(
+          { error: "Latitude and longitude are required" },
+          { status: 400 }
+        );
 
-      const weather = await getWeatherByCoords(lat, lon);
-      country = weather.country;
-      city = weather.city;
+      lat = parseFloat(String(rawLat));
+      lon = parseFloat(String(rawLon));
 
-      await upsertSearchHistory(authUser.sub, { country, city, lat, lon });
-      return NextResponse.json({ weather });
+      const coordErr = validateCoords(lat, lon);
+      if (coordErr) return NextResponse.json({ error: coordErr }, { status: 400 });
+    } else {
+      // mode === "name"
+      if (!query?.trim())
+        return NextResponse.json({ error: "Query is required" }, { status: 400 });
+
+      const geoResults = await geocodeByName(query).catch((err) => {
+        if (err instanceof WeatherApiError) throw err;
+        throw err;
+      });
+
+      if (!geoResults.length)
+        return NextResponse.json(
+          { error: "Country not found" },
+          { status: 404 }
+        );
+
+      const geo = geoResults[0];
+      lat = geo.lat;
+      lon = geo.lon;
+      city = geo.name;
+      country = geo.country;
     }
 
-    // mode === "name"
-    if (!query?.trim())
-      return NextResponse.json({ error: "Query is required" }, { status: 400 });
+    try {
+      const weather = await getWeatherByCoords(lat!, lon!);
+      country = weather.country;
+      city = city ?? weather.city;
 
-    const geoResults = await geocodeByName(query);
-    if (!geoResults.length)
-      return NextResponse.json({ error: "Location not found" }, { status: 404 });
+      // Fire-and-forget — cache update should never block the response
+      setCachedWeather(lat!, lon!, weather).catch(console.error);
+      await upsertSearchHistory(authUser.sub, { country, city, lat, lon });
 
-    const geo = geoResults[0];
-    lat = geo.lat;
-    lon = geo.lon;
-    city = geo.name;
-    country = geo.country;
-
-    const weather = await getWeatherByCoords(lat, lon);
-    await upsertSearchHistory(authUser.sub, { country, city, lat, lon });
-
-    return NextResponse.json({ weather });
+      return NextResponse.json({ weather, stale: false });
+    } catch (weatherErr) {
+      // On rate-limit (429), transparently serve the last cached result
+      if (
+        weatherErr instanceof WeatherApiError &&
+        weatherErr.status === 429
+      ) {
+        const cached = await getCachedWeather(lat!, lon!);
+        if (cached) {
+          return NextResponse.json({
+            weather: cached.data,
+            stale: true,
+            cachedAt: cached.updatedAt.toISOString(),
+          });
+        }
+        return NextResponse.json(
+          { error: "Rate limit exceeded and no cached data available. Try again shortly." },
+          { status: 429 }
+        );
+      }
+      throw weatherErr;
+    }
   } catch (err) {
     console.error(err);
+    if (err instanceof WeatherApiError)
+      return NextResponse.json({ error: err.message }, { status: err.status });
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

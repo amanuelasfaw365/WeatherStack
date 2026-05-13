@@ -19,6 +19,12 @@ interface WeatherData {
   flagUrl: string;
 }
 
+interface WeatherCardProps {
+  data: WeatherData;
+  stale?: boolean;
+  cachedAt?: string;
+}
+
 function formatTime(unix: number) {
   return new Date(unix * 1000).toLocaleTimeString([], {
     hour: "2-digit",
@@ -26,9 +32,30 @@ function formatTime(unix: number) {
   });
 }
 
-export function WeatherCard({ data }: { data: WeatherData }) {
+function formatRelative(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+export function WeatherCard({ data, stale, cachedAt }: WeatherCardProps) {
   return (
     <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl p-6 border border-slate-600 shadow-xl">
+      {stale && cachedAt && (
+        <div className="flex items-center gap-2 mb-4 bg-amber-950/60 border border-amber-700/50 rounded-xl px-3 py-2">
+          <span className="text-amber-400 text-xs">⚡</span>
+          <p className="text-amber-300 text-xs">
+            Serving cached data — Last updated{" "}
+            <span className="font-semibold">{formatRelative(cachedAt)}</span>{" "}
+            ({new Date(cachedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})
+          </p>
+        </div>
+      )}
+
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -69,7 +96,10 @@ export function WeatherCard({ data }: { data: WeatherData }) {
         <Stat label="Humidity" value={`${data.humidity}%`} />
         <Stat label="Pressure" value={`${data.pressure} hPa`} />
         <Stat label="Wind" value={`${data.wind_speed} m/s`} />
-        <Stat label="Sunrise / Sunset" value={`${formatTime(data.sunrise)} / ${formatTime(data.sunset)}`} />
+        <Stat
+          label="Sunrise / Sunset"
+          value={`${formatTime(data.sunrise)} / ${formatTime(data.sunset)}`}
+        />
       </div>
     </div>
   );
